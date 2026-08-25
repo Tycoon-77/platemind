@@ -1,0 +1,33 @@
+fastapi>=0.111.0
+uvicorn[standard]>=0.29.0
+pydantic>=2.7.0
+pydantic-settings>=2.2.0
+
+# Database
+asyncpg>=0.29.0
+sqlalchemy[asyncio]>=2.0.0
+
+# Supabase client (for auth helpers)
+supabase>=2.4.0
+
+# LLM / RAG (Phase 3)
+langchain>=0.2.0
+langchain-groq>=0.1.5
+langchain-community>=0.2.0
+groq>=0.8.0
+
+# Embeddings (Phase 2 — generated offline, but loaded at serve time)
+sentence-transformers>=3.0.0
+
+# ML / Ranker (Phase 2)
+scikit-learn>=1.4.0
+lightgbm>=4.3.0
+implicit>=0.7.0
+optuna>=3.6.0
+
+# Data
+pandas>=2.2.0
+
+# Utilities
+python-dotenv>=1.0.0
+httpx>=0.27.0

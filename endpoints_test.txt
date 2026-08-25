@@ -1,0 +1,19 @@
+=== 1. GET /recipes/137739 ===
+{
+  "error": "HTTP Error 404: Not Found"
+}
+
+=== 2. GET /recipes/search?q=chicken ===
+{
+  "error": "HTTP Error 500: Internal Server Error"
+}
+
+=== 3. POST /recommend/pantry ===
+{
+  "error": "HTTP Error 500: Internal Server Error"
+}
+
+=== 4. POST /recommend/hybrid ===
+{
+  "error": "HTTP Error 500: Internal Server Error"
+}

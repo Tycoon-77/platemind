@@ -143,4 +143,10 @@ A data leakage check was performed to verify the integrity of the evaluation:
 **Hallucination Check**: Replaced naive quote matching with an LLM-as-a-judge (Groq). Every factual claim (ingredients, time, tags) in the generated reply is checked against the retrieved context to ensure the model isn't fabricating details.
 **Reply Sanity**: Checks if the response is non-empty and >20 chars (smoke test).
 
-*(Note: The full strict eval script (`13_eval_chat.py`) was updated, but the `openai/gpt-oss-120b` model currently times out / hangs when performing the LLM-as-a-judge step on all 25 queries, so a final aggregate score cannot be generated at this time.)*
+
+
+## Phase 3 Strict LLM Eval Results (openai/gpt-oss-20b judge)
+- **Retrieval Relevance**: 10/25 (40%)
+- **Hallucination-free**:  14/25 (56%)
+- **Reply Sanity**:        25/25 (100%)
+

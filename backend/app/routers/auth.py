@@ -130,3 +130,28 @@ async def login(body: LoginRequest):
         "email":         resp.user.email,
         "display_name":  row.display_name if row else None,
     }
+
+class PreferencesRequest(BaseModel):
+    user_id: int
+    dietary_tags: list[str] = []
+    allergies: list[str] = []
+
+@router.put("/preferences")
+async def update_preferences(body: PreferencesRequest):
+    with engine.begin() as conn:
+        conn.execute(text("""
+            INSERT INTO user_preferences (user_id, dietary_tags, allergies)
+            VALUES (:uid, :tags, :allg)
+            ON CONFLICT (user_id) DO UPDATE SET
+                dietary_tags = EXCLUDED.dietary_tags,
+                allergies    = EXCLUDED.allergies
+        """), {"uid": body.user_id, "tags": body.dietary_tags, "allg": body.allergies})
+    return {"message": "Preferences updated"}
+
+@router.get("/preferences/{user_id}")
+async def get_preferences(user_id: int):
+    with engine.connect() as conn:
+        row = conn.execute(text("SELECT dietary_tags, allergies FROM user_preferences WHERE user_id = :uid"), {"uid": user_id}).fetchone()
+    if row:
+        return {"dietary_tags": row.dietary_tags, "allergies": row.allergies}
+    return {"dietary_tags": [], "allergies": []}

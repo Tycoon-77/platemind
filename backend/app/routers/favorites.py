@@ -52,3 +52,33 @@ async def add_favorite(
             VALUES (:uid, :rid, 'saved')
         """), {"uid": user_id, "rid": body.recipe_id})
     return {"user_id": user_id, "recipe_id": body.recipe_id, "status": "saved"}
+
+@router.post("/{user_id}/cooked", status_code=201)
+async def add_cooked(
+    user_id: int,
+    body: FavoriteRequest,
+    current_user: CurrentUser = Depends(require_auth),
+):
+    _check_owner(user_id, current_user)
+    with engine.begin() as conn:
+        conn.execute(text("""
+            INSERT INTO interactions (user_id, recipe_id, interaction_type)
+            VALUES (:uid, :rid, 'cooked')
+        """), {"uid": user_id, "rid": body.recipe_id})
+    return {"status": "cooked"}
+
+@router.get("/{user_id}/cooked")
+async def get_cooked(user_id: int, current_user: CurrentUser = Depends(require_auth)):
+    _check_owner(user_id, current_user)
+    with engine.connect() as conn:
+        rows = conn.execute(text("""
+            SELECT i.recipe_id, r.name, r.minutes
+            FROM interactions i
+            JOIN recipes r ON i.recipe_id = r.recipe_id
+            WHERE i.user_id = :uid AND i.interaction_type = 'cooked'
+            ORDER BY i.created_at DESC
+        """), {"uid": user_id}).fetchall()
+    return {
+        "user_id": user_id,
+        "cooked": [{"recipe_id": r.recipe_id, "name": r.name, "minutes": r.minutes} for r in rows],
+    }

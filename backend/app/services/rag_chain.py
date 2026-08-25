@@ -87,13 +87,19 @@ def _classify_intent(message: str) -> str:
 # ---------------------------------------------------------------------------
 # Prompt templates
 # ---------------------------------------------------------------------------
-_SYSTEM_BASE = """You are PlateMind, a friendly and knowledgeable culinary AI assistant.
+_SYSTEM_STRICT = """You are PlateMind, a friendly, conversational, and highly readable culinary AI assistant.
 You help users find recipes that match their pantry, dietary needs, and taste preferences.
-Always base your answers on the retrieved context recipes provided below.
-Be concise (3-5 sentences max) unless the user asks for a full recipe.
-Never invent recipe details that aren't in the context."""
 
-_PROMPT_REFINE = """{system}
+GROUNDING RULES — follow these strictly:
+- Only state facts that literally appear in the retrieved recipe context provided below.
+- Do NOT infer, estimate, or embellish any detail (e.g. calories, exact quantities, steps) that is absent from the context.
+- NEVER list the raw internal tags (like 'time-to-make', 'course', 'main-ingredient'). They are ugly database artifacts.
+- If the user asks about something not covered by the retrieved context, respond with "I don't have that information in the current recipe results" rather than guessing.
+- Format your response naturally in a conversational, human-friendly way (e.g. using bullet points, bolding recipe names). Do not just regurgitate raw database text.
+
+Be concise, warm, and highly readable."""
+
+_PROMPT_REFINE = """{system_strict}
 
 The user wants to refine the current recipe results:
 User said: "{message}"
@@ -104,7 +110,9 @@ Retrieved recipes from the database:
 Based on these recipes and the user's refinement request, suggest the best matching
 options and explain which dietary/time constraints they satisfy. Include recipe names."""
 
-_PROMPT_SUBS = """{system}
+_SYSTEM_SUBS = _SYSTEM_STRICT
+
+_PROMPT_SUBS = """{system_subs}
 
 The user has a substitution or "what if I don't have X" question:
 User said: "{message}"
@@ -112,18 +120,20 @@ User said: "{message}"
 Retrieved recipes from the database:
 {context}
 
-Provide practical substitution advice grounded in culinary knowledge. If a retrieved
-recipe already avoids the ingredient, highlight it."""
+Provide practical substitution advice grounded in your culinary knowledge. If a retrieved
+recipe relies heavily on the missing ingredient, warn them. Do not hallucinate details
+about the recipes themselves."""
 
-_PROMPT_GENERAL = """{system}
+_PROMPT_GENERAL = """{system_strict}
 
-The user has a recipe question:
+The user has a general recipe question:
 User said: "{message}"
 
 Retrieved recipes from the database:
 {context}
 
-Answer helpfully, referencing the retrieved recipes where relevant."""
+If the user is just saying hi or greeting you, greet them warmly and ask how you can help them find a recipe (ignore the context). Otherwise, answer the user's question using ONLY the provided recipe context. Recommend options
+that best fit their query. Include recipe names."""
 
 _TEMPLATES = {
     "REFINE":  _PROMPT_REFINE,
@@ -131,26 +141,7 @@ _TEMPLATES = {
     "GENERAL": _PROMPT_GENERAL,
 }
 
-
-# ---------------------------------------------------------------------------
-# pgvector retriever (LangChain PGVector)
-# ---------------------------------------------------------------------------
-def _build_pgvector_store():
-    """Lazy-initialise the LangChain PGVector store."""
-    from langchain_postgres import PGVector
-    from langchain_postgres.vectorstores import PGVector as PGV
-    from langchain_community.embeddings import HuggingFaceEmbeddings
-
-    embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
-
-    # Use our existing `recipes` table via a custom connection string.
-    # PGVector will query the `langchain_pg_embedding` table by default, but we
-    # point it at our own table via a raw SQL retriever below instead.
-    return embeddings
-
-
 _embeddings_model = None
-
 
 def _get_embeddings():
     global _embeddings_model
@@ -198,6 +189,65 @@ def _retrieve_recipes(query: str, top_k: int = 8) -> list[dict]:
 
 
 # ---------------------------------------------------------------------------
+# Contextual query rewriting (REFINE / SUBS only)
+# ---------------------------------------------------------------------------
+_REWRITE_MODEL = "openai/gpt-oss-120b"   # cheap, fast — never the 120B
+
+
+def _rewrite_query(message: str, history: list[dict]) -> str:
+    """
+    Fuse the current REFINE/SUBS message with the most recent user turn from
+    history into a self-contained retrieval query.
+
+    Example:
+      history[-2] = {"role": "user",      "content": "Show me a quick chicken dinner"}
+      message     = "Make it vegetarian"
+      → "vegetarian quick chicken dinner"
+
+    Falls back to the original message on any error.
+    """
+    if not GROQ_API_KEY or GROQ_API_KEY == "placeholder-groq-key":
+        return message
+
+    # Extract the last user turn (skip the latest assistant reply)
+    prior_user = ""
+    for turn in reversed(history):
+        if turn.get("role") == "user":
+            prior_user = turn["content"]
+            break
+
+    if not prior_user:
+        return message   # no prior context — nothing to fuse
+
+    prompt = (
+        "You are a search query optimizer for a recipe search engine.\n"
+        "Given a PRIOR user request and a FOLLOW-UP message, produce a single "
+        "self-contained recipe search query (8 words max, no punctuation) that "
+        "captures both the original topic and the follow-up constraint.\n"
+        "Output ONLY the search query — no explanation, no quotes.\n\n"
+        f"PRIOR: {prior_user}\n"
+        f"FOLLOW-UP: {message}\n"
+        "SEARCH QUERY:"
+    )
+
+    try:
+        from groq import Groq
+        client = Groq(api_key=GROQ_API_KEY)
+        resp = client.chat.completions.create(
+            model=_REWRITE_MODEL,
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=24,
+            temperature=0.0,
+        )
+        rewritten = resp.choices[0].message.content.strip().strip('"').strip("'")
+        print(f"[rag_chain] query rewrite: '{message}' + prior → '{rewritten}'")
+        return rewritten if rewritten else message
+    except Exception as exc:
+        print(f"[rag_chain] rewrite error ({type(exc).__name__}): {exc}")
+        return message
+
+
+# ---------------------------------------------------------------------------
 # Main entry point
 # ---------------------------------------------------------------------------
 def invoke_rag(
@@ -208,10 +258,11 @@ def invoke_rag(
     """
     Full RAG pipeline:
       1. TTL cache check.
-      2. Retrieve relevant recipes from pgvector.
-      3. Classify intent.
-      4. Build prompt + call Groq LLM.
-      5. Return {reply, retrieved_recipe_ids, updated_results}.
+      2. Classify intent (needed before retrieval for query rewriting).
+      3. Rewrite query for REFINE/SUBS using prior history turn (cheap LLM call).
+      4. Retrieve relevant recipes from pgvector using the (possibly rewritten) query.
+      5. Build prompt + call main Groq LLM.
+      6. Return {reply, retrieved_recipe_ids, updated_results}.
 
     On Groq rate-limit (429) → clean fallback string, no 500.
     """
@@ -223,30 +274,40 @@ def invoke_rag(
         cached["from_cache"] = True
         return cached
 
-    # 2. Retrieve
+    # 2. Classify intent first — needed to decide whether to rewrite
+    intent = _classify_intent(message)
+
+    # 3. Contextual query rewriting for REFINE / SUBS
+    #    Fuse the follow-up message with the prior user turn so the pgvector
+    #    retriever gets a self-contained query instead of a pronoun-heavy fragment.
+    retrieval_query = message
+    if intent in ("REFINE", "SUBS") and history:
+        retrieval_query = _rewrite_query(message, history)
+
+    # 4. Retrieve using the (possibly rewritten) query
     try:
-        retrieved = _retrieve_recipes(message, top_k=8)
+        retrieved = _retrieve_recipes(retrieval_query, top_k=8)
     except Exception as e:
         retrieved = []
         print(f"[rag_chain] retrieval error: {e}")
 
     recipe_ids = [r["recipe_id"] for r in retrieved]
 
-    # 3. Format context block
+    # 5. Format context block
     context_lines = []
     for r in retrieved:
         ings = ", ".join(r["ingredients"][:8])
         tags = ", ".join(r["tags"][:5])
         context_lines.append(
-            f"- **{r['name']}** ({r['minutes']} min) | tags: {tags} | ingredients: {ings}"
+            f"- **{r['name']}** ({r['minutes']} min) | ingredients: {ings}"
         )
     context_str = "\n".join(context_lines) if context_lines else "No recipes retrieved."
 
-    # 4. Intent + prompt
-    intent = _classify_intent(message)
+    # Build prompt using the original user message (not the rewritten query)
     template = _TEMPLATES[intent]
     prompt_text = template.format(
-        system=_SYSTEM_BASE,
+        system_strict=_SYSTEM_STRICT,
+        system_subs=_SYSTEM_SUBS,
         message=message,
         context=context_str,
     )

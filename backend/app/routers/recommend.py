@@ -21,14 +21,16 @@ from app.db import engine
 router = APIRouter()
 
 
+from typing import List, Optional
+
 class PantryRecommendRequest(BaseModel):
-    user_id: int
+    user_id: Optional[int] = None
     ingredients: List[str]
     dietary_tags: List[str] = []   # hard filters, e.g. ["vegan", "gluten-free"]
 
 
 class HybridRecommendRequest(BaseModel):
-    user_id: int
+    user_id: Optional[int] = None
     dietary_tags: List[str] = []
 
 
@@ -72,11 +74,14 @@ def _vector_search(conn, query_vec: list[float], top_k: int = 1000) -> list[int]
     ).fetchall()
     return [r.recipe_id for r in rows]
 
-
 def _apply_dietary_filter(conn, recipe_ids: list[int], tags: list[str]) -> list[int]:
     """Hard-filter: keep only recipes whose tags array contains ALL required tags."""
     if not tags:
-        return recipe_ids
+        rows = conn.execute(
+            text("SELECT recipe_id FROM recipes WHERE recipe_id = ANY(:ids)"),
+            {"ids": recipe_ids}
+        ).fetchall()
+        return [r.recipe_id for r in rows]
     rows = conn.execute(
         text("""
             SELECT recipe_id FROM recipes
@@ -86,7 +91,6 @@ def _apply_dietary_filter(conn, recipe_ids: list[int], tags: list[str]) -> list[
         {"ids": recipe_ids, "tags": tags},
     ).fetchall()
     return [r.recipe_id for r in rows]
-
 
 # ---------------------------------------------------------------------------
 # /recommend/pantry

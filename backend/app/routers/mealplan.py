@@ -86,7 +86,7 @@ async def generate_meal_plan(user_id: int, current_user: CurrentUser = Depends(r
     original_rids = ml_state.mf_model.item_enc_.inverse_transform(recs_idx).tolist()
     
     with engine.connect() as conn:
-        if tags:
+        if True:
             original_rids = _apply_dietary_filter(conn, original_rids, tags)
     
     if len(original_rids) < 7:

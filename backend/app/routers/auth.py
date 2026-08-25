@@ -7,7 +7,8 @@ POST /auth/login   — Authenticate, return access_token + user info.
 from __future__ import annotations
 from typing import Optional
 import os
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
+from app.auth_deps import require_auth, CurrentUser
 from pydantic import BaseModel, EmailStr
 from dotenv import load_dotenv
 from pathlib import Path
@@ -136,8 +137,13 @@ class PreferencesRequest(BaseModel):
     dietary_tags: list[str] = []
     allergies: list[str] = []
 
+def _check_owner(user_id: int, current_user: CurrentUser):
+    if current_user["user_id"] != user_id:
+        raise HTTPException(403, "Access denied: token does not match user_id")
+
 @router.put("/preferences")
-async def update_preferences(body: PreferencesRequest):
+async def update_preferences(body: PreferencesRequest, current_user: CurrentUser = Depends(require_auth)):
+    _check_owner(body.user_id, current_user)
     with engine.begin() as conn:
         conn.execute(text("""
             INSERT INTO user_preferences (user_id, dietary_tags, allergies)
@@ -149,7 +155,8 @@ async def update_preferences(body: PreferencesRequest):
     return {"message": "Preferences updated"}
 
 @router.get("/preferences/{user_id}")
-async def get_preferences(user_id: int):
+async def get_preferences(user_id: int, current_user: CurrentUser = Depends(require_auth)):
+    _check_owner(user_id, current_user)
     with engine.connect() as conn:
         row = conn.execute(text("SELECT dietary_tags, allergies FROM user_preferences WHERE user_id = :uid"), {"uid": user_id}).fetchone()
     if row:

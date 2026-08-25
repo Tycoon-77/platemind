@@ -10,7 +10,8 @@ Architecture:
 """
 
 from typing import List, Optional
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
+from app.limiter import limiter
 from pydantic import BaseModel
 import numpy as np
 from sqlalchemy import text
@@ -202,7 +203,8 @@ async def recommend_from_pantry(body: PantryRecommendRequest):
 # ---------------------------------------------------------------------------
 
 @router.post("/hybrid")
-async def recommend_hybrid(body: HybridRecommendRequest):
+@limiter.limit("20/minute")
+async def recommend_hybrid(request: Request, body: HybridRecommendRequest):
     """
     General personalised feed via MF collaborative filtering.
     Recipe metadata fetched from pgvector.

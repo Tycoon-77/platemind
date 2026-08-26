@@ -53,12 +53,13 @@ async def global_exception_handler(request: Request, exc: Exception):
 # CORS — allow the Next.js dev server during development.
 # Tighten origins list for production.
 # ---------------------------------------------------------------------------
+# Parse CORS_ORIGINS as a comma-separated list
+cors_origins_str = os.getenv("CORS_ORIGINS", "http://localhost:3000,http://127.0.0.1:3000")
+origins = [origin.strip() for origin in cors_origins_str.split(",") if origin.strip()]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        os.getenv("FRONTEND_URL", "http://localhost:3000"),
-        # TODO: Update FRONTEND_URL in Vercel to exact domain (not *)
-    ],
+    allow_origins=origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

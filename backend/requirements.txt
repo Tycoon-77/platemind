@@ -1,3 +1,4 @@
+--extra-index-url https://download.pytorch.org/whl/cpu
 aiohappyeyeballs==2.6.1
 aiohttp==3.13.5
 aiosignal==1.4.0
@@ -106,7 +107,8 @@ tenacity==9.1.2
 threadpoolctl==3.6.0
 tokenizers==0.22.2
 tomli==2.4.1
-torch==2.8.0
+torch==2.8.0+cpu ; sys_platform == "linux"
+torch==2.8.0 ; sys_platform != "linux"
 tqdm==4.70.0
 transformers==4.57.6
 typeguard==4.5.2

@@ -1,19 +1,15 @@
 """
 recipes.py — Recipe CRUD and search routes.
-
-GET  /recipes/{id}               — Fetch a single recipe by its ID.
-GET  /recipes/search             — Search recipes by keyword, cuisine, max prep+cook time.
-     Query params: q, cuisine, max_time
-
-Phase 0: stubs returning placeholder responses.
-Phase 4: wire to Postgres via async SQLAlchemy / Supabase client.
 """
 from typing import Optional
 import httpx
 import re
+import sqlite3
+import json
 from fastapi.responses import RedirectResponse
 from fastapi import APIRouter, Query, HTTPException
 from app import ml_state
+from app.ml_state import ROOT
 
 router = APIRouter()
 
@@ -23,39 +19,55 @@ async def search_recipes(
     cuisine: Optional[str] = Query(None, description="Filter by cuisine"),
     max_time: Optional[int] = Query(None, description="Max total time in minutes"),
 ):
-    """Search recipes by keyword, cuisine, and/or max total time."""
+    """Search recipes using SQLite FTS."""
+    conn = sqlite3.connect(ROOT / "data" / "processed" / "recipes.sqlite")
+    c = conn.cursor()
+    
+    query = "SELECT r.recipe_id, r.name, r.minutes, r.description, r.ingredients, r.tags, r.steps FROM recipes r"
+    conditions = []
+    params = []
+    
+    if q or cuisine:
+        # FTS join
+        query += " JOIN recipes_fts f ON r.recipe_id = f.recipe_id"
+        match_terms = []
+        if q and isinstance(q, str): match_terms.append(q)
+        if cuisine and isinstance(cuisine, str): match_terms.append(cuisine)
+        
+        match_str = " ".join(match_terms)
+        conditions.append("recipes_fts MATCH ?")
+        params.append(match_str)
+        
+    if max_time:
+        conditions.append("r.minutes <= ?")
+        params.append(max_time)
+        
+    if conditions:
+        query += " WHERE " + " AND ".join(conditions)
+        
+    query += " LIMIT 20"
+    
+    c.execute(query, params)
+    rows = c.fetchall()
+    conn.close()
+    
     results = []
-    
-    # In-memory search fallback (Phase 4 will move this to Postgres FTS)
-    q_lower = q.lower() if q else None
-    cuisine_lower = cuisine.lower() if cuisine else None
-    
-    for rid, recipe in ml_state.recipes_dict.items():
-        if max_time and recipe.get("minutes", 9999) > max_time:
-            continue
-            
-        if q_lower:
-            name = recipe.get("name") or ""
-            desc = recipe.get("description") or ""
-            text_block = (name + " " + desc).lower()
-            if q_lower not in text_block:
-                continue
-                
-        if cuisine_lower:
-            tags = " ".join(recipe.get("tags", [])).lower()
-            if cuisine_lower not in tags:
-                continue
-                
-        results.append(recipe)
-        if len(results) >= 20:  # Top 20 for in-memory limit
-            break
+    for row in rows:
+        results.append({
+            "recipe_id": row[0],
+            "name": row[1],
+            "minutes": row[2],
+            "description": row[3],
+            "ingredients": json.loads(row[4]),
+            "tags": json.loads(row[5]),
+            "steps": json.loads(row[6])
+        })
 
     return {
         "message": "success",
         "params": {"q": q, "cuisine": cuisine, "max_time": max_time},
         "results": results,
     }
-
 
 
 _image_cache = {}
@@ -73,7 +85,6 @@ async def get_recipe_image(recipe_id: int):
                 match = re.search(r'<meta name="og:image" content="(.*?)"', resp.text)
                 if match:
                     img_url = match.group(1)
-                    # Reject food.com default placeholders
                     if "gk-static" not in img_url and "default" not in img_url and "shareGraphic" not in img_url:
                         _image_cache[recipe_id] = img_url
                         return RedirectResponse(url=img_url)
@@ -83,11 +94,11 @@ async def get_recipe_image(recipe_id: int):
     fallback = "https://images.unsplash.com/photo-1546069901-ba9599a7e63c?w=400&q=80"
     return RedirectResponse(url=fallback)
 
-@router.get("/{recipe_id}")
 
+@router.get("/{recipe_id}")
 async def get_recipe(recipe_id: int):
     """Fetch a single recipe by its integer ID."""
-    if recipe_id not in ml_state.recipes_dict:
+    recipe = ml_state.get_recipe(recipe_id)
+    if not recipe:
         raise HTTPException(status_code=404, detail="Recipe not found in loaded catalog")
-        
-    return ml_state.recipes_dict[recipe_id]
+    return recipe

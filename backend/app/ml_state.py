@@ -1,18 +1,18 @@
-import pandas as pd
 import numpy as np
 import pickle
-import ast
+import json
+import sqlite3
 from pathlib import Path
 import lightgbm as lgb
-
+import importlib.util
 import sys
+
 class MatrixFactorization:
     def __init__(self, factors: int = 64, iterations: int = 30,
                  regularization: float = 0.05, alpha: float = 40.0):
         pass
 sys.modules['__main__'].MatrixFactorization = MatrixFactorization
 
-import importlib.util
 ROOT = Path(__file__).resolve().parent.parent
 
 # Load pantry matcher class
@@ -28,7 +28,6 @@ norm_spec.loader.exec_module(norm_mod)
 normalize_many = norm_mod.normalize_many
 
 # State variables
-recipes_dict = {}
 emb_dict = {}
 recipe_ings_norm = {}
 recipe_tags_set = {}
@@ -36,81 +35,52 @@ mf_model = None
 hybrid_model = None
 matcher = None
 
+# We no longer keep recipes_dict in RAM. We fetch from SQLite.
+def get_recipe(rid: int) -> dict:
+    conn = sqlite3.connect(ROOT / "data" / "processed" / "recipes.sqlite")
+    c = conn.cursor()
+    c.execute("SELECT name, minutes, description, ingredients, tags, steps FROM recipes WHERE recipe_id=?", (rid,))
+    row = c.fetchone()
+    conn.close()
+    if not row: return None
+    return {
+        "recipe_id": rid,
+        "name": row[0],
+        "minutes": row[1],
+        "description": row[2],
+        "ingredients": json.loads(row[3]),
+        "tags": json.loads(row[4]),
+        "steps": json.loads(row[5])
+    }
+
 def init_ml_state():
-    global recipes_dict, emb_dict, recipe_ings_norm, recipe_tags_set
+    global emb_dict, recipe_ings_norm, recipe_tags_set
     global mf_model, hybrid_model, matcher
 
-    print("Initializing ML State for FastAPI...")
+    print("Initializing ML State for FastAPI (Optimized SQLite Mode)...")
     MODELS_DIR = ROOT / "models"
     PROCESSED = ROOT / "data" / "processed"
 
     print("  Loading models...")
-    with open(MODELS_DIR / "mf_model.pkl", "rb") as f:
-        mf_model = pickle.load(f)
-    
-    with open(MODELS_DIR / "hybrid_lgb.pkl", "rb") as f:
-        hybrid_model = pickle.load(f)
-        
+    with open(MODELS_DIR / "mf_model.pkl", "rb") as f: mf_model = pickle.load(f)
+    with open(MODELS_DIR / "hybrid_lgb.pkl", "rb") as f: hybrid_model = pickle.load(f)
     matcher = PantryMatcher.load(MODELS_DIR / "pantry_idf.json")
     
-    print("  Loading data...")
+    print("  Loading embeddings (Pickle)...")
     try:
-        embeddings_df = pd.read_parquet(PROCESSED / "embeddings.parquet")
-        for _, row in embeddings_df.iterrows():
-            emb_dict[row['recipe_id']] = np.array(row['embedding'])
+        with open(MODELS_DIR / "emb_dict.pkl", "rb") as f:
+            emb_dict.update(pickle.load(f))
     except Exception as e:
-        print(f"Warning: could not load embeddings.parquet: {e}")
+        print(f"Warning: could not load emb_dict.pkl: {e}")
 
-    recipes_df = pd.read_parquet(PROCESSED / "recipes_clean.parquet")
-    
-    # Optional: subset recipes_df to only those we have embeddings for, to save RAM
-    if emb_dict:
-        recipes_df = recipes_df[recipes_df['recipe_id'].isin(emb_dict.keys())]
+    print("  Loading lightweight ML indices from SQLite...")
+    conn = sqlite3.connect(PROCESSED / "recipes.sqlite")
+    c = conn.cursor()
+    c.execute("SELECT recipe_id, ingredients_norm, tags FROM recipes")
+    for rid, ing_norm, tags in c.fetchall():
+        recipe_ings_norm[rid] = json.loads(ing_norm)
+        recipe_tags_set[rid] = set(json.loads(tags))
+    conn.close()
 
-    print(f"  Parsing {len(recipes_df)} recipes into memory...")
-    for row in recipes_df.itertuples():
-        rid = row.recipe_id
-        
-        # Raw Dict
-        r_dict = {
-            "recipe_id": rid,
-            "name": row.name,
-            "minutes": row.minutes,
-            "description": row.description,
-            "ingredients": row.ingredients,
-            "tags": row.tags,
-            "steps": row.steps
-        }
-        
-        # Clean ingredients
-        ing = row.ingredients
-        if isinstance(ing, str):
-            try: ing = ast.literal_eval(ing)
-            except: ing = []
-        elif isinstance(ing, np.ndarray): ing = ing.tolist()
-        if not isinstance(ing, list): ing = []
-        r_dict['ingredients'] = ing
-        recipe_ings_norm[rid] = normalize_many(ing)
-        
-        # Clean tags
-        tag = row.tags
-        if isinstance(tag, str):
-            try: tag = ast.literal_eval(tag)
-            except: tag = []
-        elif isinstance(tag, np.ndarray): tag = tag.tolist()
-        if not isinstance(tag, list): tag = []
-        r_dict['tags'] = tag
-        recipe_tags_set[rid] = set(tag)
-        
-        # Clean steps
-        steps = row.steps
-        if isinstance(steps, str):
-            try: steps = ast.literal_eval(steps)
-            except: steps = []
-        elif isinstance(steps, np.ndarray): steps = steps.tolist()
-        if not isinstance(steps, list): steps = []
-        r_dict['steps'] = steps
+    print(f"ML State Initialized! (Loaded {len(recipe_ings_norm)} indices)")
 
-        recipes_dict[rid] = r_dict
-
-    print("ML State Initialized!")

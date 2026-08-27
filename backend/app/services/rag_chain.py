@@ -334,7 +334,7 @@ def invoke_rag(
             resp = client.chat.completions.create(
                 model=GROQ_MODEL,
                 messages=messages,
-                max_tokens=512,
+                max_tokens=1536,
                 temperature=0.4,
             )
             reply = resp.choices[0].message.content.strip()

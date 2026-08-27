@@ -91,7 +91,13 @@ async def signup(body: SignupRequest):
                     allergies    = EXCLUDED.allergies
             """), {"uid": user_id, "tags": body.dietary_tags, "allg": body.allergies})
 
-    access_token = getattr(resp, "session", None); access_token = access_token.access_token if access_token else None
+    # admin.create_user does not return a session, so we must explicitly sign in
+    # the newly created user to return an access_token to the frontend.
+    try:
+        session_resp = sb.auth.sign_in_with_password({"email": body.email, "password": body.password})
+        access_token = session_resp.session.access_token
+    except Exception:
+        access_token = None
 
     return {
         "user_id":     user_id,

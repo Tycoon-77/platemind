@@ -39,6 +39,12 @@ export function Navbar() {
                 <div className="px-4 py-2 border-b border-border mb-2">
                   <p className="text-sm font-medium truncate">{displayName || email}</p>
                 </div>
+                <Link 
+                  href="/profile"
+                  className="block w-full text-left px-4 py-2 text-sm text-foreground hover:bg-secondary/50 transition-colors"
+                >
+                  Profile
+                </Link>
                 <button 
                   onClick={logout}
                   className="w-full text-left px-4 py-2 text-sm text-destructive hover:bg-secondary/50 transition-colors"

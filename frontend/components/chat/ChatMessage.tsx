@@ -1,4 +1,6 @@
 import type { FC } from "react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 
 export interface ChatMessageProps {
   role: "user" | "assistant";
@@ -18,7 +20,11 @@ const ChatMessage: FC<ChatMessageProps> = ({ role, content, isLoading }) => {
             : "bg-secondary text-secondary-foreground rounded-bl-sm border border-border"
         } ${isLoading ? "animate-pulse" : ""}`}
       >
-        {content}
+        <div className={`prose prose-sm max-w-none ${isUser ? "prose-invert" : "dark:prose-invert"}`}>
+          <ReactMarkdown remarkPlugins={[remarkGfm]}>
+            {content}
+          </ReactMarkdown>
+        </div>
       </div>
     </div>
   );

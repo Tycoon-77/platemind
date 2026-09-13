@@ -59,6 +59,35 @@ async def get_current_meal_plan(user_id: int, current_user: CurrentUser = Depend
         }
     }
 
+def _categorize_recipes(conn, recipe_ids: list[int]) -> dict:
+    rows = conn.execute(
+        text("SELECT recipe_id, tags FROM recipes WHERE recipe_id = ANY(:ids)"),
+        {"ids": recipe_ids}
+    ).fetchall()
+    
+    pools = {"breakfast": [], "main": [], "all": []}
+    tag_map = {r.recipe_id: r.tags for r in rows}
+    
+    for rid in recipe_ids:
+        tags = tag_map.get(rid) or []
+        tags_lower = set(t.lower() for t in tags)
+        
+        pools["all"].append(rid)
+        
+        is_dessert = 'desserts' in tags_lower or 'frozen-desserts' in tags_lower
+        is_snack = 'snacks' in tags_lower
+        is_bev = 'beverages' in tags_lower
+        is_breakfast = 'breakfast' in tags_lower
+        
+        if is_breakfast:
+            pools["breakfast"].append(rid)
+            
+        # Main pool explicitly excludes desserts, snacks, and beverages
+        if not (is_dessert or is_snack or is_bev):
+            pools["main"].append(rid)
+            
+    return pools
+
 @router.post("/{user_id}/generate", status_code=201)
 async def generate_meal_plan(user_id: int, current_user: CurrentUser = Depends(require_auth)):
     _check_owner(user_id, current_user)
@@ -71,7 +100,7 @@ async def generate_meal_plan(user_id: int, current_user: CurrentUser = Depends(r
         pref = conn.execute(text("SELECT dietary_tags FROM user_preferences WHERE user_id = :uid"), {"uid": user_id}).fetchone()
         tags = pref.dietary_tags if pref else []
         
-    # Generate 21 recommendations
+    # Generate 2000 recommendations to ensure enough after filtering
     from scipy.sparse import csr_matrix
     n_items = ml_state.mf_model.model_.item_factors.shape[0]
     dummy = csr_matrix((1, n_items))
@@ -79,26 +108,62 @@ async def generate_meal_plan(user_id: int, current_user: CurrentUser = Depends(r
     if user_id in ml_state.mf_model.user_enc_.classes_:
         u_idx = int(ml_state.mf_model.user_enc_.transform([user_id])[0])
         
-    # Ask for enough items so we have 21 after filtering
     recs_idx, _ = ml_state.mf_model.model_.recommend(
         u_idx, dummy, N=2000, filter_already_liked_items=False
     )
     original_rids = ml_state.mf_model.item_enc_.inverse_transform(recs_idx).tolist()
     
     with engine.connect() as conn:
-        if True:
-            original_rids = _apply_dietary_filter(conn, original_rids, tags)
+        original_rids = _apply_dietary_filter(conn, original_rids, tags)
+        pools = _categorize_recipes(conn, original_rids)
     
     if len(original_rids) < 7:
         raise HTTPException(400, "Not enough recipes match your dietary preferences to build a plan.")
         
-    # Just fill dinner for 7 days for now to ensure we have enough, or 3 slots if we have 21
-    # Let's do just dinners to be safe, or up to 21 if possible.
-    slots_needed = [(d, "dinner") for d in range(7)]
-    if len(original_rids) >= 21:
-        slots_needed = [(d, s) for d in range(7) for s in ["breakfast", "lunch", "dinner"]]
+    slots_needed = [(d, s) for d in range(7) for s in ["breakfast", "lunch", "dinner"]]
+    chosen_rids = []
+    used = set()
+    
+    for day, slot in slots_needed:
+        selected_rid = None
         
-    chosen_rids = original_rids[:len(slots_needed)]
+        if slot == "breakfast":
+            # Try explicit breakfast recipes first
+            for rid in pools["breakfast"]:
+                if rid not in used:
+                    selected_rid = rid
+                    break
+            # Fallback to main pool if we run out of breakfast options
+            if not selected_rid:
+                for rid in pools["main"]:
+                    if rid not in used:
+                        selected_rid = rid
+                        break
+        else:
+            # Lunch/Dinner: try main pool, preferring non-breakfast items
+            for rid in pools["main"]:
+                if rid not in used and rid not in pools["breakfast"]:
+                    selected_rid = rid
+                    break
+            if not selected_rid:
+                for rid in pools["main"]:
+                    if rid not in used:
+                        selected_rid = rid
+                        break
+                        
+        # Ultimate fallback (e.g. only desserts left)
+        if not selected_rid:
+            for rid in pools["all"]:
+                if rid not in used:
+                    selected_rid = rid
+                    break
+                    
+        if selected_rid:
+            used.add(selected_rid)
+            chosen_rids.append(selected_rid)
+        else:
+            chosen_rids.append(original_rids[0])
+
     
     week_start = datetime.date.today() - datetime.timedelta(days=datetime.date.today().weekday())
     

@@ -68,7 +68,7 @@ def _categorize_recipes(conn, recipe_ids: list[int]) -> dict:
     pools = {"breakfast": [], "main": [], "fallback_main": [], "all": []}
     tag_map = {r.recipe_id: r.tags for r in rows}
     
-    main_indicators = {'main-dish', 'main-ingredient', 'side-dishes', 'soups-stews', 'salads', 'dinner-party', 'lunch', 'meat', 'poultry', 'seafood', 'pasta'}
+    main_indicators = {'main-dish', 'soups-stews', 'salads', 'dinner-party', 'lunch'}
     
     for rid in recipe_ids:
         tags = tag_map.get(rid) or []
@@ -81,15 +81,16 @@ def _categorize_recipes(conn, recipe_ids: list[int]) -> dict:
         is_bev = 'beverages' in tags_lower
         is_breakfast = 'breakfast' in tags_lower
         is_bread = 'breads' in tags_lower or 'quick-breads' in tags_lower or 'muffins' in tags_lower
-        is_condiment = 'condiments-etc' in tags_lower or 'salad-dressings' in tags_lower
+        is_condiment = 'condiments-etc' in tags_lower or 'salad-dressings' in tags_lower or 'sauces' in tags_lower or 'spreads' in tags_lower or 'dips' in tags_lower
+        is_appetizer = 'appetizers' in tags_lower or 'finger-food' in tags_lower
         
         is_strict_main = any(t in main_indicators for t in tags_lower)
         
         if is_breakfast or (is_bread and not is_dessert):
             pools["breakfast"].append(rid)
             
-        # Main pool explicitly excludes desserts, snacks, beverages, breakfast, bread, and condiments
-        if not (is_dessert or is_snack or is_bev or is_breakfast or is_bread or is_condiment):
+        # Main pool explicitly excludes desserts, snacks, beverages, breakfast, bread, condiments, and appetizers
+        if not (is_dessert or is_snack or is_bev or is_breakfast or is_bread or is_condiment or is_appetizer):
             pools["fallback_main"].append(rid)
             if is_strict_main:
                 pools["main"].append(rid)

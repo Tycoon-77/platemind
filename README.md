@@ -13,7 +13,9 @@ Recipe sites are keyword-search-first, not pantry-first. You end up filtering by
 
 ## What it does
 
-<!-- Add your screenshot or GIF here! Example: ![PlateMind Demo](frontend/public/demo.gif) -->
+![PlateMind pantry dashboard](docs/screenshot-dashboard.png)
+![PlateMind chat assistant](docs/screenshot-chat.png)
+![PlateMind weekly meal plan](docs/screenshot-mealplan.png)
 
 - **Pantry-based recommendations** — type in what you have, get ranked recipes with a visible `match_reason` ("matches 8/9 ingredients, vegetarian ✓") rather than a black-box list.
 - **Conversational refinement (RAG)** — a chat panel that re-ranks the current result set or answers substitution questions, backed by retrieval over a vector store, not just a generic LLM call.

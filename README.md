@@ -40,7 +40,7 @@ This started as a variation on a bootcamp project (UrbanNest) whose deliverable 
                              ▼
                       ┌──────────────┐
                       │  Groq API     │
-                      │ (Llama 3.3)   │
+                      │(gpt-oss-120b) │
                       └──────────────┘
 ```
 
@@ -54,7 +54,7 @@ This started as a variation on a bootcamp project (UrbanNest) whose deliverable 
 **Backend:** FastAPI, SQLAlchemy, LangChain
 **ML/Data:** scikit-learn, `implicit` (ALS), LightGBM, Optuna, sentence-transformers, pandas
 **Data store:** Supabase (Postgres + pgvector), SQLite for the read-heavy recipe catalog (see [Deployment challenges](#deployment-challenges))
-**LLM:** Groq (Llama 3.3 70B / 3.1 8B) — chosen for a genuinely free tier suitable for a live demo, avoiding the reliability tradeoffs of self-hosting a model behind a public URL
+**LLM:** OpenAI's gpt-oss-120b (open-weight), served via Groq's inference API — chosen for a genuinely free tier suitable for a live demo, avoiding the reliability tradeoffs of self-hosting a model behind a public URL
 **Hosting:** Vercel (frontend), Railway (backend, Docker), Supabase (DB)
 
 ---

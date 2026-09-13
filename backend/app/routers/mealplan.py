@@ -65,8 +65,10 @@ def _categorize_recipes(conn, recipe_ids: list[int]) -> dict:
         {"ids": recipe_ids}
     ).fetchall()
     
-    pools = {"breakfast": [], "main": [], "all": []}
+    pools = {"breakfast": [], "main": [], "fallback_main": [], "all": []}
     tag_map = {r.recipe_id: r.tags for r in rows}
+    
+    main_indicators = {'main-dish', 'main-ingredient', 'side-dishes', 'soups-stews', 'salads', 'dinner-party', 'lunch', 'meat', 'poultry', 'seafood', 'pasta'}
     
     for rid in recipe_ids:
         tags = tag_map.get(rid) or []
@@ -78,13 +80,19 @@ def _categorize_recipes(conn, recipe_ids: list[int]) -> dict:
         is_snack = 'snacks' in tags_lower
         is_bev = 'beverages' in tags_lower
         is_breakfast = 'breakfast' in tags_lower
+        is_bread = 'breads' in tags_lower or 'quick-breads' in tags_lower or 'muffins' in tags_lower
+        is_condiment = 'condiments-etc' in tags_lower or 'salad-dressings' in tags_lower
         
-        if is_breakfast:
+        is_strict_main = any(t in main_indicators for t in tags_lower)
+        
+        if is_breakfast or (is_bread and not is_dessert):
             pools["breakfast"].append(rid)
             
-        # Main pool explicitly excludes desserts, snacks, and beverages
-        if not (is_dessert or is_snack or is_bev):
-            pools["main"].append(rid)
+        # Main pool explicitly excludes desserts, snacks, beverages, breakfast, bread, and condiments
+        if not (is_dessert or is_snack or is_bev or is_breakfast or is_bread or is_condiment):
+            pools["fallback_main"].append(rid)
+            if is_strict_main:
+                pools["main"].append(rid)
             
     return pools
 
@@ -140,13 +148,14 @@ async def generate_meal_plan(user_id: int, current_user: CurrentUser = Depends(r
                         selected_rid = rid
                         break
         else:
-            # Lunch/Dinner: try main pool, preferring non-breakfast items
+            # Lunch/Dinner: try strict main pool
             for rid in pools["main"]:
-                if rid not in used and rid not in pools["breakfast"]:
+                if rid not in used:
                     selected_rid = rid
                     break
+            # Fallback to general non-dessert/non-breakfast recipes
             if not selected_rid:
-                for rid in pools["main"]:
+                for rid in pools["fallback_main"]:
                     if rid not in used:
                         selected_rid = rid
                         break

@@ -33,7 +33,7 @@ const MealSlot: FC<MealSlotProps> = ({ recipe, onSwapClick }) => {
       )}
       
       <p 
-        className="text-xs font-serif font-medium text-foreground line-clamp-3 leading-snug z-10 pointer-events-none capitalize break-words pr-2"
+        className="text-xs font-serif font-medium text-foreground line-clamp-2 leading-snug z-10 pointer-events-none capitalize pr-2"
         title={recipe.name}
       >
         {recipe.name}

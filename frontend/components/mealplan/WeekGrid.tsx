@@ -15,7 +15,7 @@ export interface WeekGridProps {
 const WeekGrid: FC<WeekGridProps> = ({ mealPlan = {}, onSlotSwap }) => {
   return (
     <div className="overflow-x-auto pb-4">
-      <table className="w-full border-separate border-spacing-y-3 border-spacing-x-2 min-w-[800px]">
+      <table className="w-full border-separate border-spacing-y-3 border-spacing-x-2 min-w-[1000px]">
         <thead>
           <tr>
             <th className="w-20" />

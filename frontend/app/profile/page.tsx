@@ -198,7 +198,7 @@ export default function ProfilePage() {
               </div>
             ) : cooked.length === 0 ? (
               <div className="bg-card border border-dashed border-border p-8 rounded-2xl text-center">
-                <p className="text-muted-foreground mb-4">You haven\haven'tapos;t marked any recipes as cooked yet.</p>
+                <p className="text-muted-foreground mb-4">You haven&apos;t marked any recipes as cooked yet.</p>
                 <Link href="/" className="text-primary font-medium hover:underline">
                   Find a recipe to cook
                 </Link>
